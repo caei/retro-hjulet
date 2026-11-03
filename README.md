@@ -90,8 +90,8 @@ I stedet for tradisjonelle lapper (Start/Stop/Continue) fokuserer RetroHjulet p√
 
 1. **Klon repoet:**
    ```bash
-   git clone https://github.com/OWNER/stresshjul-retro.git
-   cd stresshjul-retro
+   git clone https://github.com/caei/retro-hjulet.git
+   cd retro-hjulet
    ```
 
 2. **Installer avhengigheter:**
