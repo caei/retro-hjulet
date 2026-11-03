@@ -129,10 +129,10 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
       name: c.name,
       color: c.color,
       description: c.description,
-      averageScore: 5.0,
+      averageScore: 0,
       isHighFocus: false,
       claimIds: [],
-      keyTakeaway: 'Innspill samles under retrospektivet'
+      keyTakeaway: c.description ? `Fokusområde: ${c.description}` : undefined
     }));
 
     const newBoard: RetroBoard = {

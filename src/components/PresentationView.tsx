@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { RetroBoard, Claim } from '../types/retro';
 import { StressWheel } from './StressWheel';
 import {
@@ -27,7 +27,17 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   onGoToStatus
 }) => {
   const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
-  const [discussedClaimIds, setDiscussedClaimIds] = useState<Set<string>>(new Set());
+
+  // Set of discussed claim IDs, synchronized across all participants via board
+  const discussedSet = useMemo(() => {
+    const set = new Set<string>(board.discussedClaimIds || []);
+    board.claims.forEach(c => {
+      if (c.isDiscussed) {
+        set.add(c.id);
+      }
+    });
+    return set;
+  }, [board.claims, board.discussedClaimIds]);
 
   // Current presenter index
   const currentPresenterId = board.presentingParticipantId || board.participants[0]?.id;
@@ -66,11 +76,50 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   };
 
   const toggleDiscussed = (claimId: string) => {
-    setDiscussedClaimIds(prev => {
-      const next = new Set(prev);
-      if (next.has(claimId)) next.delete(claimId);
-      else next.add(claimId);
-      return next;
+    if (board.isReadOnly) return;
+    const isNowDiscussed = !discussedSet.has(claimId);
+
+    const updatedClaims = board.claims.map(c =>
+      c.id === claimId ? { ...c, isDiscussed: isNowDiscussed } : c
+    );
+
+    const nextDiscussedIds = new Set(discussedSet);
+    if (isNowDiscussed) {
+      nextDiscussedIds.add(claimId);
+    } else {
+      nextDiscussedIds.delete(claimId);
+    }
+
+    onUpdateBoard({
+      ...board,
+      claims: updatedClaims,
+      discussedClaimIds: Array.from(nextDiscussedIds)
+    });
+  };
+
+  const handleToggleAllPresenterClaims = () => {
+    if (board.isReadOnly || presenterClaims.length === 0) return;
+    const allDiscussed = presenterClaims.every(c => discussedSet.has(c.id));
+    const targetState = !allDiscussed;
+
+    const presenterClaimIdSet = new Set(presenterClaims.map(c => c.id));
+    const updatedClaims = board.claims.map(c =>
+      presenterClaimIdSet.has(c.id) ? { ...c, isDiscussed: targetState } : c
+    );
+
+    const nextDiscussedIds = new Set(discussedSet);
+    presenterClaims.forEach(c => {
+      if (targetState) {
+        nextDiscussedIds.add(c.id);
+      } else {
+        nextDiscussedIds.delete(c.id);
+      }
+    });
+
+    onUpdateBoard({
+      ...board,
+      claims: updatedClaims,
+      discussedClaimIds: Array.from(nextDiscussedIds)
     });
   };
 
@@ -229,9 +278,20 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
               </p>
             </div>
 
-            <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">
-              {discussedClaimIds.size} av {presenterClaims.length} gjennomgått
-            </span>
+            <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1 sm:gap-3 shrink-0">
+              <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">
+                {presenterClaims.filter(c => discussedSet.has(c.id)).length} av {presenterClaims.length} gjennomgått
+              </span>
+              {presenterClaims.length > 0 && !board.isReadOnly && (
+                <button
+                  type="button"
+                  onClick={handleToggleAllPresenterClaims}
+                  className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 underline underline-offset-2 transition-colors cursor-pointer"
+                >
+                  {presenterClaims.every(c => discussedSet.has(c.id)) ? 'Nullstill alle' : 'Merk alle'}
+                </button>
+              )}
+            </div>
           </div>
 
           {presenterClaims.length === 0 ? (
@@ -243,7 +303,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
               {sortedClaims.map((claim) => {
                 const cat = categoryMap.get(claim.categoryId);
                 const isSelected = selectedClaimId === claim.id;
-                const isDiscussed = discussedClaimIds.has(claim.id);
+                const isDiscussed = discussedSet.has(claim.id);
 
                 return (
                   <div
@@ -262,16 +322,19 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
                         {/* Discussed Checkbox */}
                         <button
                           type="button"
+                          disabled={board.isReadOnly}
                           onClick={e => {
                             e.stopPropagation();
                             toggleDiscussed(claim.id);
                           }}
-                          className={`w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 mt-0.5 transition-colors cursor-pointer ${
+                          className={`w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 mt-0.5 transition-colors ${
+                            board.isReadOnly ? 'cursor-default opacity-75' : 'cursor-pointer'
+                          } ${
                             isDiscussed
                               ? 'bg-emerald-600 border-emerald-500 text-white'
                               : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-transparent hover:border-slate-500'
                           }`}
-                          title={isDiscussed ? 'Merk som ubehandlet' : 'Merk som diskutert'}
+                          title={board.isReadOnly ? 'Skrivebeskyttet' : (isDiscussed ? 'Merk som ubehandlet' : 'Merk som diskutert')}
                         >
                           <Check className="w-3.5 h-3.5" />
                         </button>

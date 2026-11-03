@@ -25,10 +25,15 @@ const boardRooms = new Map<string, Set<WebSocket>>();
 // Map socket to its current boardId
 const socketToBoard = new Map<WebSocket, string>();
 
-// Gemini is optional. Creating the client without a key can prevent the server
-// from starting, so initialize it only when a key is configured.
-const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
-const ai = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null;
+// Initialize Gemini SDK with telemetry header
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    },
+  },
+});
 
 // Broadcast helper for a specific board room
 function broadcastToRoom(boardId: string, message: any, excludeSocket?: WebSocket) {
@@ -206,7 +211,7 @@ app.post('/api/ai/cluster-claims', async (req, res) => {
       return res.status(400).json({ error: 'Ingen påstander oppgitt for analysering' });
     }
 
-    if (!ai) {
+    if (!process.env.GEMINI_API_KEY) {
       return res.json({
         fallback: true,
         summary: 'Gruppert basert på eksisterende kategorier (KI-nøkkel ikke oppgitt).',
@@ -242,7 +247,7 @@ OPPGAVE:
    - "averageScore": Gjennomsnittlig eller vurdert stress-score (1.0 til 10.0) for dette området.
    - "isHighFocus": boolean, true dersom dette er et akutt problemområde som teamet bør prioritere å løse.
    - "claimIndices": Liste med 1-baserte indekser fra listen over som tilhører denne kategorien.
-   - "keyTakeaway": Hovedinnsikt for denne kategorien.
+   - "keyTakeaway": Konkret og unik hovedinnsikt for denne kategorien (hvilken påstand skaper mest friksjon/stress, eller god flyt). Må være spesifikk for dette temaet, ALDRI en generell standardsetning.
 3. Lag en samlet oppsummering av stemningen i teamet ("summary"), en liste over 2-4 konkrete fokusområder som bør adresseres ("focusAreas"), og 2-3 konkrete tiltaksforslag ("recommendations").
 
 Svar utelukkende i JSON.`;
@@ -345,7 +350,7 @@ Svar utelukkende i JSON.`;
 // Helper for local deterministic fallback clustering
 function clusterLocally(claims: any[], defaultCategories: any[] = []) {
   if (!claims || claims.length === 0) return [];
-  const map: Record<string, { name: string; color: string; scores: number[]; claimIds: string[] }> = {};
+  const map: Record<string, { name: string; color: string; claims: any[] }> = {};
 
   for (const c of claims) {
     const key = c.categoryName || 'Generelt';
@@ -353,26 +358,47 @@ function clusterLocally(claims: any[], defaultCategories: any[] = []) {
       map[key] = {
         name: key,
         color: c.categoryColor || '#3B82F6',
-        scores: [],
-        claimIds: [],
+        claims: [],
       };
     }
-    map[key].scores.push(Number(c.score) || 5);
-    map[key].claimIds.push(c.id);
+    map[key].claims.push(c);
   }
 
   return Object.keys(map).map((k, idx) => {
     const item = map[k];
-    const avg = item.scores.reduce((a, b) => a + b, 0) / (item.scores.length || 1);
+    const scores = item.claims.map((c: any) => Number(c.score) || 5);
+    const avg = scores.reduce((a: number, b: number) => a + b, 0) / (scores.length || 1);
+    const roundedAvg = Math.round(avg * 10) / 10;
+
+    // Sort claims by score descending to extract the most significant friction point
+    const sortedClaims = [...item.claims].sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+    const topClaim = sortedClaims[0];
+    const topText = topClaim?.text ? (topClaim.text.length > 50 ? topClaim.text.slice(0, 48) + '...' : topClaim.text) : '';
+
+    let keyTakeaway = '';
+    if (topClaim) {
+      if (topClaim.score >= 8) {
+        keyTakeaway = `Kritisk friksjon: "${topText}" (${topClaim.score}/10). ${sortedClaims.length > 1 ? `Totalt ${sortedClaims.length} påstander.` : ''}`;
+      } else if (topClaim.score >= 6) {
+        keyTakeaway = `Merkbar friksjon: "${topText}" (${topClaim.score}/10). ${sortedClaims.length > 1 ? `Totalt ${sortedClaims.length} påstander registrert.` : ''}`;
+      } else if (topClaim.score >= 4) {
+        keyTakeaway = `Moderat friksjon: "${topText}" (${topClaim.score}/10). ${sortedClaims.length > 1 ? `Totalt ${sortedClaims.length} påstander.` : ''}`;
+      } else {
+        keyTakeaway = `God flyt: "${topText}" (${topClaim.score}/10). Lav friksjon rapportert av teamet.`;
+      }
+    } else {
+      keyTakeaway = `Innspill samlet under ${item.name}`;
+    }
+
     return {
       id: `cat-loc-${idx + 1}`,
       name: item.name,
       description: `Innspill samlet under ${item.name}`,
       color: item.color,
-      averageScore: Math.round(avg * 10) / 10,
-      isHighFocus: avg >= 6.5,
-      claimIds: item.claimIds,
-      keyTakeaway: avg >= 7 ? 'Høyt stress/friksjonsnivå rapportert' : 'Moderat til lavt stressnivå',
+      averageScore: roundedAvg,
+      isHighFocus: roundedAvg >= 6.0,
+      claimIds: item.claims.map((c: any) => c.id),
+      keyTakeaway,
     };
   });
 }

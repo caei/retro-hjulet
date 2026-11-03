@@ -35,10 +35,42 @@ function RetroApp() {
     return null;
   });
 
+  // User's own independent view phase for this board
+  const [localPhase, setLocalPhase] = useState<RetroPhase>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const phaseParam = params.get('phase') as RetroPhase | null;
+    if (phaseParam && ['input', 'status', 'present', 'spider'].includes(phaseParam)) {
+      return phaseParam;
+    }
+    const boardParam = params.get('board');
+    if (boardParam) {
+      try {
+        const saved = localStorage.getItem(`retro_phase_${boardParam}`) as RetroPhase | null;
+        if (saved && ['input', 'status', 'present', 'spider'].includes(saved)) {
+          return saved;
+        }
+      } catch {}
+    }
+    return 'input';
+  });
+
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState(false);
+
+  // Keep localPhase updated if browser back/forward buttons are pressed
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const phaseParam = params.get('phase') as RetroPhase | null;
+      if (phaseParam && ['input', 'status', 'present', 'spider'].includes(phaseParam)) {
+        setLocalPhase(phaseParam);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // If a board ID is in the URL, but wasn't in localStorage, try fetching it from server
   useEffect(() => {
@@ -54,6 +86,23 @@ function RetroApp() {
           if (serverBoard) {
             setBoard(serverBoard);
             saveBoard(serverBoard);
+
+            // Set localPhase if not specified in URL query
+            const url = new URL(window.location.href);
+            if (!url.searchParams.get('phase')) {
+              let initial: RetroPhase = 'input';
+              try {
+                const saved = localStorage.getItem(`retro_phase_${serverBoard.id}`) as RetroPhase | null;
+                if (saved && ['input', 'status', 'present', 'spider'].includes(saved)) {
+                  initial = saved;
+                } else if (serverBoard.isReadOnly) {
+                  initial = 'spider';
+                }
+              } catch {}
+              setLocalPhase(initial);
+              url.searchParams.set('phase', initial);
+              window.history.replaceState({}, '', url.toString());
+            }
           }
         })
         .catch(err => console.warn('Could not fetch board from server:', err));
@@ -79,13 +128,17 @@ function RetroApp() {
     broadcastBoard(updated);
   };
 
+  // Changing phase is independent per participant and does NOT force other participants to switch
   const handlePhaseChange = (phase: RetroPhase) => {
-    if (!board) return;
-    const updated: RetroBoard = {
-      ...board,
-      currentPhase: phase
-    };
-    handleUpdateBoard(updated);
+    setLocalPhase(phase);
+    if (board) {
+      try {
+        localStorage.setItem(`retro_phase_${board.id}`, phase);
+      } catch {}
+      const url = new URL(window.location.href);
+      url.searchParams.set('phase', phase);
+      window.history.replaceState({}, '', url.toString());
+    }
   };
 
   const handleSelectBoard = (selected: RetroBoard) => {
@@ -96,17 +149,42 @@ function RetroApp() {
     setBoard(selected);
     broadcastBoard(selected);
 
+    // Determine initial phase for this user:
     const url = new URL(window.location.href);
     url.searchParams.set('board', selected.id);
+
+    let nextPhase: RetroPhase = 'input';
+    const phaseParam = url.searchParams.get('phase') as RetroPhase | null;
+    if (phaseParam && ['input', 'status', 'present', 'spider'].includes(phaseParam)) {
+      nextPhase = phaseParam;
+    } else {
+      try {
+        const saved = localStorage.getItem(`retro_phase_${selected.id}`) as RetroPhase | null;
+        if (saved && ['input', 'status', 'present', 'spider'].includes(saved)) {
+          nextPhase = saved;
+        } else if (selected.isDemo || selected.isReadOnly) {
+          nextPhase = selected.currentPhase || 'spider';
+        } else {
+          nextPhase = 'input';
+        }
+      } catch {
+        nextPhase = 'input';
+      }
+    }
+
+    setLocalPhase(nextPhase);
+    url.searchParams.set('phase', nextPhase);
     window.history.pushState({}, '', url.toString());
   };
 
   const handleCreateBoard = (newBoard: RetroBoard) => {
     handleSelectBoard(newBoard);
+    handlePhaseChange('input');
   };
 
   const handleImportBoard = (imported: RetroBoard) => {
     handleSelectBoard(imported);
+    handlePhaseChange(imported.currentPhase || 'spider');
   };
 
   const handleLeaveBoard = () => {
@@ -114,6 +192,7 @@ function RetroApp() {
     const url = new URL(window.location.href);
     url.searchParams.delete('board');
     url.searchParams.delete('participant');
+    url.searchParams.delete('phase');
     window.history.pushState({}, '', url.toString());
   };
 
@@ -147,6 +226,7 @@ function RetroApp() {
       {/* Top Header with Real-Time Presence, Language Switcher & Leave Action */}
       <Header
         board={board}
+        currentPhase={localPhase}
         onPhaseChange={handlePhaseChange}
         onNewBoard={() => setIsCreateOpen(true)}
         onOpenExport={() => setIsExportOpen(true)}
@@ -157,9 +237,9 @@ function RetroApp() {
         onlineCount={onlineCount}
       />
 
-      {/* Main Content Body */}
+      {/* Main Content Body - Independent step navigation for each participant */}
       <main className="flex-1 pb-16">
-        {board.currentPhase === 'input' && (
+        {localPhase === 'input' && (
           <ParticipantInputView
             board={board}
             onUpdateBoard={handleUpdateBoard}
@@ -168,23 +248,23 @@ function RetroApp() {
           />
         )}
 
-        {board.currentPhase === 'status' && (
+        {localPhase === 'status' && (
           <TeamStatusView
             board={board}
             onUpdateBoard={handleUpdateBoard}
             onSelectPresenter={(pId) => {
               const updated = {
                 ...board,
-                currentPhase: 'present' as RetroPhase,
                 presentingParticipantId: pId
               };
               handleUpdateBoard(updated);
+              handlePhaseChange('present');
             }}
             onGoToInput={() => handlePhaseChange('input')}
           />
         )}
 
-        {board.currentPhase === 'present' && (
+        {localPhase === 'present' && (
           <PresentationView
             board={board}
             onUpdateBoard={handleUpdateBoard}
@@ -193,7 +273,7 @@ function RetroApp() {
           />
         )}
 
-        {board.currentPhase === 'spider' && (
+        {localPhase === 'spider' && (
           <SpiderAnalysisView
             board={board}
             onUpdateBoard={handleUpdateBoard}

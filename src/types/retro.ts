@@ -13,6 +13,7 @@ export interface Claim {
   score: number; // 1 to 10 (1 = minimal friction, 10 = maximum stress/blocker)
   categoryId: string;
   notes?: string;
+  isDiscussed?: boolean; // Markert som gjennomgått under presentasjon
 }
 
 export interface Participant {
@@ -62,6 +63,7 @@ export interface RetroBoard {
   presentingParticipantId?: string;
   isReadOnly?: boolean; // Skrivebeskyttet når importert fra JSON-arkiv
   isDemo?: boolean; // Demo-tavle for utprøving (skal ikke lagres i nylige tavler)
+  discussedClaimIds?: string[]; // ID-er for påstander som er gjennomgått
 }
 
 export const DEFAULT_CATEGORIES: Category[] = [

@@ -314,13 +314,117 @@ export function exportBoardToPdf(board: RetroBoard, language: Language = 'nb') {
   doc.line(margin, y, pageWidth - margin, y);
   y += 8;
 
-  // --- Key Summary Stats ---
+  // --- Key Summary Stats & Enriched Category Data ---
   const totalClaims = board.claims.length;
   const overallAvg = totalClaims > 0
     ? (board.claims.reduce((acc, c) => acc + c.score, 0) / totalClaims).toFixed(1)
     : '0';
 
-  const highFocusCats = board.spiderCategories.filter(c => c.isHighFocus || c.averageScore >= 6.5);
+  // Compute real category averages, dynamic status, and distinct takeaways from actual claims
+  const enrichedCategories = board.spiderCategories.map(cat => {
+    const matchingClaims = board.claims.filter(c => {
+      if (c.categoryId === cat.id) return true;
+      if (cat.claimIds && cat.claimIds.includes(c.id)) return true;
+      const origCat = board.categories.find(k => k.id === c.categoryId);
+      if (origCat && origCat.name.trim().toLowerCase() === cat.name.trim().toLowerCase()) return true;
+      const extraName = (c as any).categoryName;
+      if (extraName && typeof extraName === 'string' && extraName.trim().toLowerCase() === cat.name.trim().toLowerCase()) return true;
+      return false;
+    });
+
+    let avg = cat.averageScore;
+    if (matchingClaims.length > 0) {
+      const sum = matchingClaims.reduce((acc, c) => acc + c.score, 0);
+      avg = Math.round((sum / matchingClaims.length) * 10) / 10;
+    } else if (!avg || avg === 5) {
+      avg = 0;
+    }
+
+    let statusText: string;
+    let statusColor: [number, number, number];
+    let isHigh = false;
+
+    if (matchingClaims.length === 0 && avg === 0) {
+      statusText = language === 'en' ? 'NO CLAIMS' : (language === 'nn' ? 'INGEN INNSPEL' : 'INGEN PÅSTANDER');
+      statusColor = [100, 116, 139]; // Slate
+    } else if (avg >= 7.5) {
+      statusText = language === 'en' ? 'CRITICAL FOCUS' : 'KRITISK FOKUS';
+      statusColor = [220, 38, 38]; // Red
+      isHigh = true;
+    } else if (avg >= 6.0) {
+      statusText = language === 'en' ? 'HIGH PRIORITY' : (language === 'nn' ? 'HØG PRIORITET' : 'HØY PRIORITET');
+      statusColor = [234, 88, 12]; // Orange
+      isHigh = true;
+    } else if (avg >= 4.0) {
+      statusText = language === 'en' ? 'MODERATE' : 'MODERAT';
+      statusColor = [217, 119, 6]; // Amber
+    } else {
+      statusText = language === 'en' ? 'LOW FRICTION' : (language === 'nn' ? 'LÅG FRIKSJON' : 'LAV FRIKSJON');
+      statusColor = [22, 163, 74]; // Emerald
+    }
+
+    // Determine unique takeaway - aggressively replace any generic fallback phrase
+    let takeaway = cat.keyTakeaway?.trim();
+    const isGenericTakeaway = !takeaway ||
+      takeaway === '-' ||
+      takeaway === 'Innspill samles under retrospektivet' ||
+      takeaway.startsWith('Innspill samles') ||
+      takeaway.includes('Moderat til lavt stressnivå') ||
+      takeaway.includes('Høyt stress/friksjonsnivå') ||
+      takeaway.includes('Innspill samlet under');
+
+    if (isGenericTakeaway) {
+      if (matchingClaims.length > 0) {
+        const sorted = [...matchingClaims].sort((a, b) => b.score - a.score);
+        const top = sorted[0];
+        const topText = top.text.length > 55 ? top.text.slice(0, 52) + '...' : top.text;
+        if (top.score >= 8) {
+          takeaway = language === 'en'
+            ? `Critical friction: "${topText}" (${top.score}/10). ${sorted.length > 1 ? `Total ${sorted.length} claims (avg ${avg}/10).` : ''}`
+            : language === 'nn'
+            ? `Kritisk friksjon: "${topText}" (${top.score}/10). ${sorted.length > 1 ? `Totalt ${sorted.length} innspel (snitt ${avg}/10).` : ''}`
+            : `Kritisk friksjon: "${topText}" (${top.score}/10). ${sorted.length > 1 ? `Totalt ${sorted.length} påstander (snitt ${avg}/10).` : ''}`;
+        } else if (top.score >= 6) {
+          takeaway = language === 'en'
+            ? `Noticeable friction: "${topText}" (${top.score}/10). ${sorted.length > 1 ? `Total ${sorted.length} claims (avg ${avg}/10).` : ''}`
+            : language === 'nn'
+            ? `Merkbar friksjon: "${topText}" (${top.score}/10). ${sorted.length > 1 ? `Totalt ${sorted.length} innspel (snitt ${avg}/10).` : ''}`
+            : `Merkbar friksjon: "${topText}" (${top.score}/10). ${sorted.length > 1 ? `Totalt ${sorted.length} påstander (snitt ${avg}/10).` : ''}`;
+        } else if (top.score >= 4) {
+          takeaway = language === 'en'
+            ? `Moderate friction: "${topText}" (${top.score}/10). ${sorted.length > 1 ? `Total ${sorted.length} claims (avg ${avg}/10).` : ''}`
+            : language === 'nn'
+            ? `Moderat friksjon: "${topText}" (${top.score}/10). ${sorted.length > 1 ? `Totalt ${sorted.length} innspel (snitt ${avg}/10).` : ''}`
+            : `Moderat friksjon: "${topText}" (${top.score}/10). ${sorted.length > 1 ? `Totalt ${sorted.length} påstander (snitt ${avg}/10).` : ''}`;
+        } else {
+          takeaway = language === 'en'
+            ? `Good flow: "${topText}" (${top.score}/10). Low friction reported.`
+            : language === 'nn'
+            ? `God flyt: "${topText}" (${top.score}/10). Lågt stress rapportert.`
+            : `God flyt: "${topText}" (${top.score}/10). Lav friksjon rapportert av teamet.`;
+        }
+      } else if (cat.description) {
+        takeaway = cat.description;
+      } else {
+        takeaway = language === 'en' ? 'No claims submitted for this category.' : (language === 'nn' ? 'Ingen innspel registrert for dette emnet.' : 'Ingen påstander registrert for dette emnet.');
+      }
+    }
+
+    return {
+      ...cat,
+      averageScore: avg,
+      statusText,
+      statusColor,
+      isHigh,
+      takeaway,
+      claimCount: matchingClaims.length
+    };
+  });
+
+  // Sort categories descending by average score so high stress is on top!
+  enrichedCategories.sort((a, b) => b.averageScore - a.averageScore);
+
+  const highFocusCats = enrichedCategories.filter(c => c.isHigh);
 
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(226, 232, 240);
@@ -481,9 +585,9 @@ export function exportBoardToPdf(board: RetroBoard, language: Language = 'nb') {
   doc.text(tPdf.colTakeaway, colTakeaway, y + 4.8);
   y += 7;
 
-  board.spiderCategories.forEach(cat => {
-    const isHigh = cat.isHighFocus || cat.averageScore >= 6.5;
-    const takeaway = cat.keyTakeaway || cat.description || '-';
+  enrichedCategories.forEach(cat => {
+    const isHigh = cat.isHigh;
+    const takeaway = cat.takeaway || '-';
 
     // Word wrap the takeaway lines so it NEVER truncates!
     doc.setFont('helvetica', 'normal');
@@ -513,20 +617,16 @@ export function exportBoardToPdf(board: RetroBoard, language: Language = 'nb') {
     doc.setFont('courier', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(15, 23, 42);
-    doc.text(`${cat.averageScore.toFixed(1)} / 10`, colScore, y + 4.5);
+    const scoreText = cat.claimCount > 0 || cat.averageScore > 0 ? `${cat.averageScore.toFixed(1)} / 10` : '-';
+    doc.text(scoreText, colScore, y + 4.5);
 
-    // Status pill
+    // Dynamic Status pill with contextual priority
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
-    if (isHigh) {
-      doc.setTextColor(220, 38, 38);
-      doc.text(tPdf.statusCritical, colStatus, y + 4.5);
-    } else {
-      doc.setTextColor(22, 163, 74);
-      doc.text(tPdf.statusNormal, colStatus, y + 4.5);
-    }
+    doc.setTextColor(cat.statusColor[0], cat.statusColor[1], cat.statusColor[2]);
+    doc.text(cat.statusText, colStatus, y + 4.5);
 
-    // FULL Hovedinnsikt text (no .substring(0, 32)!)
+    // FULL Hovedinnsikt text with exact top friction point for this category
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(51, 65, 85);

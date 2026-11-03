@@ -25,12 +25,12 @@ export const SpiderChart: React.FC<SpiderChartProps> = ({
   if (numAxes < 3) {
     return (
       <div
-        className="flex items-center justify-center border border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-8 text-center text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/40"
+        className="flex items-center justify-center border border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-8 text-center text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-900/40"
         style={{ width: size, height: size, maxWidth: '100%' }}
       >
         <div>
-          <p className="font-semibold text-slate-800 dark:text-slate-300">Trenger minst 3 kategorier for edderkoppdiagram</p>
-          <p className="text-xs text-slate-500 mt-1">Legg til fleire kategorier eller kjør KI-gruppering.</p>
+          <p className="font-bold text-slate-900 dark:text-slate-200">Trenger minst 3 kategorier for edderkoppdiagram</p>
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">Legg til fleire kategorier eller kjør KI-gruppering.</p>
         </div>
       </div>
     );
@@ -120,9 +120,9 @@ export const SpiderChart: React.FC<SpiderChartProps> = ({
                 <text
                   x={center + 5}
                   y={center - (lvl / 10) * radius + 11}
-                  fill={isLight ? "#475569" : "#64748b"}
-                  fontSize="9"
-                  fontWeight="600"
+                  fill={isLight ? "#1e293b" : "#94a3b8"}
+                  fontSize="9.5"
+                  fontWeight="700"
                   fontFamily="monospace"
                 >
                   {lvl}
@@ -156,14 +156,14 @@ export const SpiderChart: React.FC<SpiderChartProps> = ({
 
             if (isLight) {
               if (isSelected || isHovered) {
-                labelColor = '#4338ca'; // deep indigo
-                scoreColor = '#312e81';
+                labelColor = '#312e81'; // dark indigo
+                scoreColor = '#1e1b4b';
               } else if (isHigh) {
-                labelColor = '#b91c1c'; // deep red
-                scoreColor = '#dc2626';
+                labelColor = '#991b1b'; // dark bold red
+                scoreColor = '#b91c1c';
               } else {
-                labelColor = '#0f172a'; // deep slate/black
-                scoreColor = '#475569'; // dark slate grey
+                labelColor = '#0f172a'; // deep slate
+                scoreColor = '#1e293b'; // dark slate
               }
             } else {
               if (isSelected || isHovered) {

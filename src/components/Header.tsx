@@ -23,6 +23,7 @@ import { ThemeToggle } from './ThemeToggle';
 
 interface HeaderProps {
   board: RetroBoard;
+  currentPhase?: RetroPhase;
   onPhaseChange: (phase: RetroPhase) => void;
   onNewBoard: () => void;
   onOpenExport: () => void;
@@ -35,6 +36,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   board,
+  currentPhase,
   onPhaseChange,
   onNewBoard,
   onOpenExport,
@@ -256,7 +258,8 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700/80 shadow-2xs sm:hidden">
             {phases.map((phase) => {
               const Icon = phase.icon;
-              const isActive = board.currentPhase === phase.id;
+              const activePhase = currentPhase || board.currentPhase;
+              const isActive = activePhase === phase.id;
               return (
                 <button
                   key={phase.id}
@@ -280,7 +283,8 @@ export const Header: React.FC<HeaderProps> = ({
             <nav className="flex items-center gap-2 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 shadow-2xs">
               {phases.map((phase) => {
                 const Icon = phase.icon;
-                const isActive = board.currentPhase === phase.id;
+                const activePhase = currentPhase || board.currentPhase;
+                const isActive = activePhase === phase.id;
                 return (
                   <button
                     key={phase.id}
